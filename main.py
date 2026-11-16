@@ -58,13 +58,57 @@ def resolve_output_dir() -> Path:
     return Path("/output")
 
 
+# Magic-byte prefixes for the two image formats the grader accepts.
+# The file is delivered under the name ``entry.png`` regardless of
+# which of these formats it actually contains.
+PNG_MAGIC = b"\x89PNG"
+JPEG_MAGIC = b"\xff\xd8\xff"
+
+# The grader rejects outputs larger than 1 MiB.
+MAX_OUTPUT_BYTES = 1_048_576
+
+
+def validate_image_bytes(path: Path) -> int:
+    """Validate the magic bytes and size of the image at ``path``.
+
+    Returns the file size in bytes. Raises ``ValueError`` if the
+    file does not start with a PNG or JPEG signature, or if it
+    exceeds the grader's size limit.
+    """
+    size = path.stat().st_size
+    if size > MAX_OUTPUT_BYTES:
+        raise ValueError(
+            f"{path} is {size} bytes, over the {MAX_OUTPUT_BYTES}-byte limit"
+        )
+    with path.open("rb") as handle:
+        header = handle.read(4)
+    if not (header.startswith(PNG_MAGIC) or header.startswith(JPEG_MAGIC)):
+        raise ValueError(
+            f"{path} has unrecognised magic bytes {header!r}; "
+            "expected a PNG or JPEG image"
+        )
+    return size
+
+
 def main() -> int:
     source = locate_source()
+    source_size = validate_image_bytes(source)
+
     output_dir = resolve_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     destination = output_dir / "entry.png"
     shutil.copyfile(source, destination)
+
+    # Post-copy verification: the delivered file must still be a
+    # valid-format image and exactly the same size as the source,
+    # so a truncated or corrupted copy can never pass silently.
+    destination_size = validate_image_bytes(destination)
+    if destination_size != source_size:
+        raise IOError(
+            f"copy verification failed: source is {source_size} bytes "
+            f"but destination is {destination_size} bytes"
+        )
     return 0
 
 
